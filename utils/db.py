@@ -70,3 +70,61 @@ def delete_player(player_id: int):
         return False, f"Errore: {e}"
     finally:
         conn.close()
+        
+        
+# ---------- FUNZIONI PER LE PARTITE ----------
+
+def create_match(match_date, location, notes, team_a_ids, team_b_ids, goals):
+    """
+    Crea una partita completa: dati della partita, squadre e goal.
+    
+    Parametri:
+        match_date: data della partita (datetime.date)
+        location: luogo (stringa, può essere vuota)
+        notes: note (stringa, può essere vuota)
+        team_a_ids: lista di player_id che giocano nella squadra A
+        team_b_ids: lista di player_id che giocano nella squadra B
+        goals: lista di dict con chiavi 'scorer_id', 'assist_id' (può essere None), 'team'
+    
+    Restituisce (True, match_id) se ok, (False, messaggio_errore) altrimenti.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # 1. Inserisci la partita
+        cursor.execute(
+            "INSERT INTO matches (match_date, location, notes) VALUES (?, ?, ?);",
+            (match_date.isoformat(), location.strip() or None, notes.strip() or None)
+        )
+        match_id = cursor.lastrowid
+        
+        # 2. Inserisci le partecipazioni squadra A
+        for player_id in team_a_ids:
+            cursor.execute(
+                "INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'A');",
+                (match_id, player_id)
+            )
+        
+        # 3. Inserisci le partecipazioni squadra B
+        for player_id in team_b_ids:
+            cursor.execute(
+                "INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'B');",
+                (match_id, player_id)
+            )
+        
+        # 4. Inserisci i goal
+        for goal in goals:
+            cursor.execute(
+                "INSERT INTO goals (match_id, scorer_id, assist_id) VALUES (?, ?, ?);",
+                (match_id, goal['scorer_id'], goal.get('assist_id'))
+            )
+        
+        conn.commit()
+        return True, match_id
+    
+    except Exception as e:
+        conn.rollback()  # annulla tutto se qualcosa va storto
+        return False, f"Errore durante il salvataggio: {e}"
+    finally:
+        conn.close()
