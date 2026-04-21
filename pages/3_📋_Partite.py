@@ -99,30 +99,45 @@ for match in matches:
         else:
             st.info("Nessun goal registrato per questa partita.")
         
-        # Bottone elimina (con conferma a doppio click)
+        # Azioni: modifica + elimina (solo manager/admin)
         if can_edit:
             st.divider()
-            confirm_key = f"confirm_delete_{match['id']}"
-            if confirm_key not in st.session_state:
-                st.session_state[confirm_key] = False
+            col_edit, col_del = st.columns(2)
             
-            if not st.session_state[confirm_key]:
-                if st.button("🗑️ Elimina partita", key=f"del_btn_{match['id']}"):
-                    st.session_state[confirm_key] = True
-                    st.rerun()
-            else:
-                st.warning("⚠️ Sei sicuro? Questa azione non può essere annullata.")
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("✅ Sì, elimina", key=f"confirm_yes_{match['id']}", type="primary"):
-                        success, msg = delete_match(match['id'])
-                        if success:
-                            st.success(msg)
-                            del st.session_state[confirm_key]
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                with col2:
-                    if st.button("❌ Annulla", key=f"confirm_no_{match['id']}"):
-                        st.session_state[confirm_key] = False
+            # --- Bottone Modifica ---
+            with col_edit:
+                if st.button("✏️ Modifica partita", key=f"edit_btn_{match['id']}", use_container_width=True):
+                    st.session_state["editing_match_id"] = match['id']
+                    # Pulisci eventuale stato residuo di una modifica precedente
+                    st.session_state.pop("edit_goals", None)
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("edit_init_"):
+                            st.session_state.pop(k, None)
+                    st.switch_page("pages/5_✏️_Modifica_Partita.py")
+            
+            # --- Bottone Elimina (con conferma a doppio click) ---
+            with col_del:
+                confirm_key = f"confirm_delete_{match['id']}"
+                if confirm_key not in st.session_state:
+                    st.session_state[confirm_key] = False
+                
+                if not st.session_state[confirm_key]:
+                    if st.button("🗑️ Elimina partita", key=f"del_btn_{match['id']}", use_container_width=True):
+                        st.session_state[confirm_key] = True
                         st.rerun()
+                else:
+                    st.warning("⚠️ Sei sicuro?")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("✅ Sì", key=f"confirm_yes_{match['id']}", type="primary", use_container_width=True):
+                            success, msg = delete_match(match['id'])
+                            if success:
+                                st.success(msg)
+                                del st.session_state[confirm_key]
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                    with c2:
+                        if st.button("❌ No", key=f"confirm_no_{match['id']}", use_container_width=True):
+                            st.session_state[confirm_key] = False
+                            st.rerun()

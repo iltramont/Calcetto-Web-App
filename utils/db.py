@@ -382,3 +382,85 @@ def count_admins():
     ).fetchone()[0]
     conn.close()
     return count
+
+
+def update_match(match_id: int, match_date, location, notes, team_a_ids, team_b_ids, goals):
+    """
+    Aggiorna una partita esistente: dati base, squadre e goal.
+    Riscrive completamente partecipazioni e goal (più semplice e sicuro).
+    
+    I goal passati possono avere 'id' (goal esistenti) o non averlo (nuovi).
+    Se un giocatore viene rimosso dalle squadre e aveva segnato, i suoi goal
+    vengono trasformati automaticamente in "goal sconosciuti" (scorer_id=NULL).
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN;")
+        
+        # 1. Aggiorna i dati base della partita
+        cursor.execute("""
+            UPDATE matches 
+            SET match_date = ?, location = ?, notes = ?
+            WHERE id = ?;
+        """, (
+            match_date.isoformat(),
+            location.strip() or None,
+            notes.strip() or None,
+            match_id
+        ))
+        
+        # 2. Riscrivi le partecipazioni: cancella tutte e reinserisci
+        cursor.execute("DELETE FROM match_players WHERE match_id = ?;", (match_id,))
+        
+        for player_id in team_a_ids:
+            cursor.execute(
+                "INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'A');",
+                (match_id, player_id)
+            )
+        for player_id in team_b_ids:
+            cursor.execute(
+                "INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'B');",
+                (match_id, player_id)
+            )
+        
+        # 3. Riscrivi i goal: cancella tutti e reinserisci
+        # Se un marcatore non gioca più, lo trasformiamo in "goal sconosciuto"
+        valid_player_ids = set(team_a_ids) | set(team_b_ids)
+        
+        cursor.execute("DELETE FROM goals WHERE match_id = ?;", (match_id,))
+        
+        for goal in goals:
+            scorer_id = goal.get('scorer_id')
+            assist_id = goal.get('assist_id')
+            
+            # Se il marcatore non è più tra i giocatori, lo rimuoviamo (goal sconosciuto)
+            if scorer_id is not None and scorer_id not in valid_player_ids:
+                scorer_id = None
+                assist_id = None  # senza marcatore non ha senso mantenere l'assist
+            
+            # Stessa logica per l'assist: se chi ha fatto assist non gioca più, lo rimuoviamo
+            if assist_id is not None and assist_id not in valid_player_ids:
+                assist_id = None
+            
+            cursor.execute(
+                """INSERT INTO goals 
+                   (match_id, scorer_id, assist_id, team, is_own_goal) 
+                   VALUES (?, ?, ?, ?, ?);""",
+                (
+                    match_id,
+                    scorer_id,
+                    assist_id,
+                    goal['team'],
+                    1 if goal.get('is_own_goal') else 0
+                )
+            )
+        
+        conn.commit()
+        return True, "Partita aggiornata."
+    
+    except Exception as e:
+        conn.rollback()
+        return False, f"Errore durante l'aggiornamento: {e}"
+    finally:
+        conn.close()

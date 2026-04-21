@@ -126,14 +126,14 @@ giocatori = st.Page("pages/1_👥_Giocatori.py", title="Giocatori", icon="👥")
 nuova_partita = st.Page("pages/2_⚽_Nuova_Partita.py", title="Nuova Partita", icon="⚽")
 partite = st.Page("pages/3_📋_Partite.py", title="Partite", icon="📋")
 utenti = st.Page("pages/4_👤_Utenti.py", title="Utenti", icon="👤")
+modifica_partita = st.Page("pages/5_✏️_Modifica_Partita.py", title="Modifica Partita", icon="✏️")
 
-# Menu dinamico in base al ruolo
 role = get_current_user_role()
 
 if role == "admin":
-    pages = [home, giocatori, nuova_partita, partite, utenti]
+    pages = [home, giocatori, nuova_partita, partite, modifica_partita, utenti]
 elif role == "manager":
-    pages = [home, giocatori, nuova_partita, partite]
+    pages = [home, giocatori, nuova_partita, partite, modifica_partita]
 elif role == "viewer":
     pages = [home, giocatori, partite]
 else:

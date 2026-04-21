@@ -86,23 +86,31 @@ all_players_in_match = team_a_nicks + team_b_nicks
 if not all_players_in_match:
     st.info("Seleziona prima i giocatori delle due squadre.")
 else:
+    # Il radio va FUORI dal form, altrimenti non reagisce dinamicamente
+    goal_type = st.radio(
+        "Tipo di goal",
+        options=["Normale", "Autogoal", "Sconosciuto (senza marcatore)"],
+        horizontal=True,
+        key="new_goal_type"
+    )
+    
     with st.form("add_goal_form", clear_on_submit=True):
-        # Tipo di goal
-        goal_type = st.radio(
-            "Tipo di goal",
-            options=["Normale", "Autogoal", "Sconosciuto (senza marcatore)"],
-            horizontal=True
-        )
-        
         col1, col2 = st.columns(2)
         
         if goal_type == "Normale":
             with col1:
-                scorer = st.selectbox("Marcatore", options=all_players_in_match)
+                scorer = st.selectbox(
+                    "Marcatore",
+                    options=all_players_in_match,
+                    key="new_normal_scorer"
+                )
             with col2:
-                assist_options = ["(nessuno)"] + [n for n in all_players_in_match if n != scorer]
-                assist = st.selectbox("Assist (opzionale)", options=assist_options)
-        
+                assist = st.selectbox(
+                    "Assist (opzionale)",
+                    options=["(nessuno)"] + all_players_in_match,
+                    key="new_normal_assist"
+                )
+                
         elif goal_type == "Autogoal":
             with col1:
                 scorer = st.selectbox(
@@ -111,9 +119,9 @@ else:
                     help="Il goal andrà a favore della squadra avversaria"
                 )
             with col2:
-                st.write("")  # spazio vuoto per allineamento
+                st.write("")
                 st.caption("🔄 Il punto va alla squadra avversaria")
-            assist = "(nessuno)"  # niente assist per autogoal
+            assist = "(nessuno)"
         
         else:  # Sconosciuto
             with col1:
@@ -130,17 +138,19 @@ else:
         
         if add_goal_btn:
             if goal_type == "Normale":
-                team = "A" if scorer in team_a_nicks else "B"
-                st.session_state.goals.append({
-                    "scorer_nickname": scorer,
-                    "scorer_id": nickname_to_id[scorer],
-                    "assist_nickname": assist if assist != "(nessuno)" else None,
-                    "assist_id": nickname_to_id[assist] if assist != "(nessuno)" else None,
-                    "team": team,
-                    "is_own_goal": False
-                })
+                if assist != "(nessuno)" and assist == scorer:
+                    st.error("Il marcatore e l'assistman non possono essere la stessa persona.")
+                else:
+                    team = "A" if scorer in team_a_nicks else "B"
+                    st.session_state.goals.append({
+                        "scorer_nickname": scorer,
+                        "scorer_id": nickname_to_id[scorer],
+                        "assist_nickname": assist if assist != "(nessuno)" else None,
+                        "assist_id": nickname_to_id[assist] if assist != "(nessuno)" else None,
+                        "team": team,
+                        "is_own_goal": False
+                    })
             elif goal_type == "Autogoal":
-                # La squadra che prende il punto è quella AVVERSARIA al marcatore
                 scorer_team = "A" if scorer in team_a_nicks else "B"
                 team = "B" if scorer_team == "A" else "A"
                 st.session_state.goals.append({
