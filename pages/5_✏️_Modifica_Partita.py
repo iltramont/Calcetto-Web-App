@@ -62,7 +62,10 @@ st.subheader("📅 Dati della partita")
 
 col1, col2 = st.columns(2)
 with col1:
-    current_date = datetime.strptime(details['date'], "%Y-%m-%d").date()
+    if isinstance(details['date'], str):
+        current_date = datetime.strptime(details['date'], "%Y-%m-%d").date()
+    else:
+        current_date = details['date']
     new_date = st.date_input("Data", value=current_date, key="edit_date")
 with col2:
     new_location = st.text_input("Luogo", value=details['location'] or "", key="edit_location")

@@ -31,7 +31,11 @@ st.divider()
 # Mostriamo ogni partita in un expander con dentro tutti i dettagli
 for match in matches:
     # Formatta la data in italiano (dd/mm/yyyy)
-    date_obj = datetime.strptime(match['match_date'], "%Y-%m-%d").date()
+    # Supporta sia stringa (SQLite) sia date object (PostgreSQL)
+    if isinstance(match['match_date'], str):
+        date_obj = datetime.strptime(match['match_date'], "%Y-%m-%d").date()
+    else:
+        date_obj = match['match_date']
     date_str = date_obj.strftime("%d/%m/%Y")
     
     # Etichetta dell'expander con data e punteggio
