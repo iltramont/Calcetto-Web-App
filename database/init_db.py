@@ -29,13 +29,15 @@ def init_database():
     """)
 
     # --- Tabella utenti (per il login) ---
-    # Collegata ai giocatori: ogni user corrisponde a un player
+    # Un utente può essere collegato a un giocatore (tramite player_id) o essere
+    # un semplice spettatore senza collegamento.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            player_id INTEGER NOT NULL UNIQUE,
+            player_id INTEGER UNIQUE,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('admin', 'manager', 'viewer')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (player_id) REFERENCES players(id)
         );
@@ -69,12 +71,14 @@ def init_database():
 
     # --- Tabella goal ---
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS goals (
+        CREATE TABLE goals_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             match_id INTEGER NOT NULL,
-            scorer_id INTEGER NOT NULL,
+            scorer_id INTEGER,
             assist_id INTEGER,
             minute INTEGER,
+            team TEXT NOT NULL CHECK (team IN ('A', 'B')),
+            is_own_goal INTEGER DEFAULT 0,
             FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
             FOREIGN KEY (scorer_id) REFERENCES players(id),
             FOREIGN KEY (assist_id) REFERENCES players(id)

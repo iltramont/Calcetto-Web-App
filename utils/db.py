@@ -114,10 +114,19 @@ def create_match(match_date, location, notes, team_a_ids, team_b_ids, goals):
             )
         
         # 4. Inserisci i goal
+        # 4. Inserisci i goal
         for goal in goals:
             cursor.execute(
-                "INSERT INTO goals (match_id, scorer_id, assist_id) VALUES (?, ?, ?);",
-                (match_id, goal['scorer_id'], goal.get('assist_id'))
+                """INSERT INTO goals 
+                   (match_id, scorer_id, assist_id, team, is_own_goal) 
+                   VALUES (?, ?, ?, ?, ?);""",
+                (
+                    match_id,
+                    goal.get('scorer_id'),      # può essere None
+                    goal.get('assist_id'),      # può essere None
+                    goal['team'],               # 'A' o 'B' (squadra che prende il punto)
+                    1 if goal.get('is_own_goal') else 0
+                )
             )
         
         conn.commit()
@@ -128,3 +137,248 @@ def create_match(match_date, location, notes, team_a_ids, team_b_ids, goals):
         return False, f"Errore durante il salvataggio: {e}"
     finally:
         conn.close()
+        
+        
+def get_all_matches():
+    """
+    Restituisce tutte le partite con il punteggio finale calcolato.
+    Ordinate dalla più recente alla più vecchia.
+    """
+    conn = get_connection()
+    matches = conn.execute("""
+        SELECT 
+            m.id,
+            m.match_date,
+            m.location,
+            m.notes,
+            COALESCE(SUM(CASE WHEN g.team = 'A' THEN 1 ELSE 0 END), 0) AS score_a,
+            COALESCE(SUM(CASE WHEN g.team = 'B' THEN 1 ELSE 0 END), 0) AS score_b
+        FROM matches m
+        LEFT JOIN goals g ON g.match_id = m.id
+        GROUP BY m.id
+        ORDER BY m.match_date DESC, m.id DESC;
+    """).fetchall()
+    conn.close()
+    return matches
+
+
+def get_match_details(match_id: int):
+    """
+    Restituisce un dizionario con tutti i dettagli di una partita:
+    - info base (data, luogo, note)
+    - giocatori divisi per squadra
+    - lista dei goal con marcatore, assist, squadra
+    """
+    conn = get_connection()
+    
+    # Info base partita
+    match = conn.execute(
+        "SELECT id, match_date, location, notes FROM matches WHERE id = ?;",
+        (match_id,)
+    ).fetchone()
+    
+    if not match:
+        conn.close()
+        return None
+    
+    # Giocatori e squadre
+    players_rows = conn.execute("""
+        SELECT p.id, p.nickname, p.name, mp.team
+        FROM match_players mp
+        JOIN players p ON p.id = mp.player_id
+        WHERE mp.match_id = ?
+        ORDER BY mp.team, p.nickname;
+    """, (match_id,)).fetchall()
+    
+    team_a = [dict(p) for p in players_rows if p['team'] == 'A']
+    team_b = [dict(p) for p in players_rows if p['team'] == 'B']
+    
+    # Goal con info marcatore, assist e squadra che ha preso il punto
+    goals_rows = conn.execute("""
+        SELECT 
+            g.id,
+            g.minute,
+            g.team,
+            g.is_own_goal,
+            scorer.nickname AS scorer_nickname,
+            assist.nickname AS assist_nickname
+        FROM goals g
+        LEFT JOIN players scorer ON scorer.id = g.scorer_id
+        LEFT JOIN players assist ON assist.id = g.assist_id
+        WHERE g.match_id = ?
+        ORDER BY g.id;
+    """, (match_id,)).fetchall()
+    
+    goals = [dict(g) for g in goals_rows]
+    
+    # Punteggio
+    score_a = sum(1 for g in goals if g['team'] == 'A')
+    score_b = sum(1 for g in goals if g['team'] == 'B')
+    
+    conn.close()
+    
+    return {
+        "id": match['id'],
+        "date": match['match_date'],
+        "location": match['location'],
+        "notes": match['notes'],
+        "team_a": team_a,
+        "team_b": team_b,
+        "goals": goals,
+        "score_a": score_a,
+        "score_b": score_b
+    }
+
+
+def delete_match(match_id: int):
+    """Elimina una partita e tutti i goal/partecipazioni collegate (cascade)."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM matches WHERE id = ?;", (match_id,))
+        conn.commit()
+        return True, "Partita eliminata."
+    except Exception as e:
+        return False, f"Errore: {e}"
+    finally:
+        conn.close()
+        
+        
+# ---------- FUNZIONI PER GLI UTENTI / LOGIN ----------
+
+def get_all_users_for_auth():
+    """
+    Restituisce tutti gli utenti nel formato richiesto da streamlit-authenticator,
+    più un dizionario separato username -> role per controllare i permessi.
+    """
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT u.username, u.password_hash, u.role, p.nickname
+        FROM users u
+        LEFT JOIN players p ON p.id = u.player_id;
+    """).fetchall()
+    conn.close()
+    
+    credentials = {"usernames": {}}
+    roles = {}
+    for row in rows:
+        # Se l'utente è collegato a un giocatore, mostriamo il nickname
+        # Altrimenti mostriamo l'username come nome visualizzato
+        display_name = row['nickname'] if row['nickname'] else row['username']
+        credentials["usernames"][row['username']] = {
+            "name": display_name,
+            "password": row['password_hash']
+        }
+        roles[row['username']] = row['role']
+    
+    return credentials, roles
+
+
+def create_user(username: str, password_hash: str, role: str = 'viewer', player_id: int = None):
+    """
+    Crea un account utente.
+    - player_id opzionale: se None, è un utente "solo spettatore" non legato a un giocatore
+    - role: 'admin' o 'viewer' o 'manager'
+    """
+    if role not in ('admin', 'viewer', 'manager'):
+        return False, "Ruolo non valido."
+    
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO users (player_id, username, password_hash, role) VALUES (?, ?, ?, ?);",
+            (player_id, username.strip().lower(), password_hash, role)
+        )
+        conn.commit()
+        return True, f"Account '{username}' creato come {role}!"
+    except sqlite3.IntegrityError as e:
+        if "username" in str(e):
+            return False, f"Lo username '{username}' è già in uso."
+        elif "player_id" in str(e):
+            return False, "Questo giocatore ha già un account."
+        else:
+            return False, f"Errore: {e}"
+    except Exception as e:
+        return False, f"Errore: {e}"
+    finally:
+        conn.close()
+
+
+def update_user_password(username: str, new_password_hash: str):
+    """Aggiorna la password di un utente."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE username = ?;",
+            (new_password_hash, username)
+        )
+        conn.commit()
+        return True, "Password aggiornata."
+    except Exception as e:
+        return False, f"Errore: {e}"
+    finally:
+        conn.close()
+
+
+def get_players_without_user():
+    """Restituisce i giocatori che NON hanno ancora un account."""
+    conn = get_connection()
+    players = conn.execute("""
+        SELECT p.id, p.name, p.nickname
+        FROM players p
+        LEFT JOIN users u ON u.player_id = p.id
+        WHERE u.id IS NULL
+        ORDER BY p.nickname;
+    """).fetchall()
+    conn.close()
+    return players
+
+
+def get_all_users():
+    """Restituisce tutti gli utenti con il loro ruolo e giocatore collegato (se c'è)."""
+    conn = get_connection()
+    users = conn.execute("""
+        SELECT u.id, u.username, u.role, u.created_at, p.nickname AS player_nickname
+        FROM users u
+        LEFT JOIN players p ON p.id = u.player_id
+        ORDER BY u.role DESC, u.username;
+    """).fetchall()
+    conn.close()
+    return users
+
+
+def update_user_role(user_id: int, new_role: str):
+    """Cambia il ruolo di un utente."""
+    if new_role not in ('admin', 'viewer', 'manager'):
+        return False, "Ruolo non valido."
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE users SET role = ? WHERE id = ?;", (new_role, user_id))
+        conn.commit()
+        return True, f"Ruolo aggiornato a '{new_role}'."
+    except Exception as e:
+        return False, f"Errore: {e}"
+    finally:
+        conn.close()
+
+
+def delete_user(user_id: int):
+    """Elimina un utente."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM users WHERE id = ?;", (user_id,))
+        conn.commit()
+        return True, "Utente eliminato."
+    except Exception as e:
+        return False, f"Errore: {e}"
+    finally:
+        conn.close()
+
+
+def count_admins():
+    """Conta quanti admin ci sono (serve per non lasciare l'app senza admin)."""
+    conn = get_connection()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE role = 'admin';"
+    ).fetchone()[0]
+    conn.close()
+    return count

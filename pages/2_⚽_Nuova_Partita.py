@@ -5,12 +5,14 @@ import streamlit as st
 import sys
 from datetime import date
 from pathlib import Path
+from utils.auth import require_manager
 
 sys.path.append(str(Path(__file__).parent.parent))
 
 from utils.db import get_all_players, create_match
 
 st.set_page_config(page_title="Nuova Partita", page_icon="⚽")
+user = require_manager()
 
 st.title("⚽ Nuova Partita")
 
@@ -76,43 +78,94 @@ st.divider()
 st.subheader("⚽ Goal")
 st.caption("Aggiungi i goal segnati durante la partita.")
 
-# Usiamo session_state per tenere in memoria i goal mentre si aggiungono
 if "goals" not in st.session_state:
     st.session_state.goals = []
 
-# Form per aggiungere un goal alla volta
 all_players_in_match = team_a_nicks + team_b_nicks
 
 if not all_players_in_match:
     st.info("Seleziona prima i giocatori delle due squadre.")
 else:
     with st.form("add_goal_form", clear_on_submit=True):
+        # Tipo di goal
+        goal_type = st.radio(
+            "Tipo di goal",
+            options=["Normale", "Autogoal", "Sconosciuto (senza marcatore)"],
+            horizontal=True
+        )
+        
         col1, col2 = st.columns(2)
-        with col1:
-            scorer = st.selectbox("Marcatore", options=all_players_in_match)
-        with col2:
-            # L'assist è opzionale, mostriamo "Nessuno" come default
-            assist_options = ["(nessuno)"] + [n for n in all_players_in_match if n != scorer]
-            assist = st.selectbox("Assist (opzionale)", options=assist_options)
+        
+        if goal_type == "Normale":
+            with col1:
+                scorer = st.selectbox("Marcatore", options=all_players_in_match)
+            with col2:
+                assist_options = ["(nessuno)"] + [n for n in all_players_in_match if n != scorer]
+                assist = st.selectbox("Assist (opzionale)", options=assist_options)
+        
+        elif goal_type == "Autogoal":
+            with col1:
+                scorer = st.selectbox(
+                    "Chi ha fatto autogoal", 
+                    options=all_players_in_match,
+                    help="Il goal andrà a favore della squadra avversaria"
+                )
+            with col2:
+                st.write("")  # spazio vuoto per allineamento
+                st.caption("🔄 Il punto va alla squadra avversaria")
+            assist = "(nessuno)"  # niente assist per autogoal
+        
+        else:  # Sconosciuto
+            with col1:
+                scoring_team = st.selectbox(
+                    "Quale squadra ha segnato?",
+                    options=["Squadra A 🟢", "Squadra B 🔴"]
+                )
+            with col2:
+                st.caption("⚠️ Goal senza marcatore registrato")
+            scorer = None
+            assist = "(nessuno)"
         
         add_goal_btn = st.form_submit_button("➕ Aggiungi goal")
         
         if add_goal_btn:
-            # Determina la squadra del marcatore
-            team = "A" if scorer in team_a_nicks else "B"
-            st.session_state.goals.append({
-                "scorer_nickname": scorer,
-                "scorer_id": nickname_to_id[scorer],
-                "assist_nickname": assist if assist != "(nessuno)" else None,
-                "assist_id": nickname_to_id[assist] if assist != "(nessuno)" else None,
-                "team": team
-            })
+            if goal_type == "Normale":
+                team = "A" if scorer in team_a_nicks else "B"
+                st.session_state.goals.append({
+                    "scorer_nickname": scorer,
+                    "scorer_id": nickname_to_id[scorer],
+                    "assist_nickname": assist if assist != "(nessuno)" else None,
+                    "assist_id": nickname_to_id[assist] if assist != "(nessuno)" else None,
+                    "team": team,
+                    "is_own_goal": False
+                })
+            elif goal_type == "Autogoal":
+                # La squadra che prende il punto è quella AVVERSARIA al marcatore
+                scorer_team = "A" if scorer in team_a_nicks else "B"
+                team = "B" if scorer_team == "A" else "A"
+                st.session_state.goals.append({
+                    "scorer_nickname": scorer,
+                    "scorer_id": nickname_to_id[scorer],
+                    "assist_nickname": None,
+                    "assist_id": None,
+                    "team": team,
+                    "is_own_goal": True
+                })
+            else:  # Sconosciuto
+                team = "A" if scoring_team.startswith("Squadra A") else "B"
+                st.session_state.goals.append({
+                    "scorer_nickname": None,
+                    "scorer_id": None,
+                    "assist_nickname": None,
+                    "assist_id": None,
+                    "team": team,
+                    "is_own_goal": False
+                })
 
-# Mostra i goal aggiunti finora con possibilità di rimuoverli
+# Mostra i goal aggiunti
 if st.session_state.goals:
     st.markdown("**Goal aggiunti:**")
     
-    # Conteggio per squadra
     goals_a = sum(1 for g in st.session_state.goals if g['team'] == 'A')
     goals_b = sum(1 for g in st.session_state.goals if g['team'] == 'B')
     st.markdown(f"### 🟢 {goals_a} — {goals_b} 🔴")
@@ -120,9 +173,17 @@ if st.session_state.goals:
     for i, goal in enumerate(st.session_state.goals):
         col1, col2 = st.columns([5, 1])
         with col1:
-            assist_str = f" (assist: {goal['assist_nickname']})" if goal['assist_nickname'] else ""
             team_emoji = "🟢" if goal['team'] == 'A' else "🔴"
-            st.write(f"{team_emoji} **{goal['scorer_nickname']}**{assist_str}")
+            
+            if goal['is_own_goal']:
+                label = f"{team_emoji} **Autogoal di {goal['scorer_nickname']}** ⚠️"
+            elif goal['scorer_nickname'] is None:
+                label = f"{team_emoji} *Goal sconosciuto*"
+            else:
+                assist_str = f" (assist: {goal['assist_nickname']})" if goal['assist_nickname'] else ""
+                label = f"{team_emoji} **{goal['scorer_nickname']}**{assist_str}"
+            
+            st.write(label)
         with col2:
             if st.button("🗑️", key=f"rm_goal_{i}"):
                 st.session_state.goals.pop(i)
