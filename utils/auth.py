@@ -5,6 +5,10 @@ import streamlit as st
 import streamlit_authenticator as stauth
 from utils.db import get_all_users_for_auth
 
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 
 def get_authenticator():
     """
@@ -22,7 +26,7 @@ def get_authenticator():
     authenticator = stauth.Authenticate(
         credentials=credentials,
         cookie_name="calcetto_auth",
-        cookie_key="cambia_questa_chiave_segreta_random_123abc",
+        cookie_key=os.getenv("COOKIE_KEY", "dev_cookie_key_not_for_production"),
         cookie_expiry_days=30,
     )
     return authenticator

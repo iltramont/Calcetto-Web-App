@@ -138,6 +138,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv/
 env/
 venv/
 ENV/
@@ -209,3 +210,15 @@ __marimo__/
 
 # Database
 *.db
+
+# Streamlit secrets file
+.streamlit/secrets.toml
+
+
+*.pyc
+*.pyo
+*.sqlite
+*.sqlite3
+.vscode/
+.DS_Store
+Thumbs.db
