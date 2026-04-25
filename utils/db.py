@@ -466,3 +466,63 @@ def count_admins():
     count = row['c'] if 'c' in row else list(row.values())[0]
     conn.close()
     return count
+
+
+# ---------- FUNZIONI PER STATISTICHE ----------
+
+def get_standings():
+    """
+    Calcola la classifica generale: per ogni giocatore restituisce 
+    partite giocate, vittorie, pareggi, sconfitte e punti.
+    
+    Punti: 3 per vittoria, 1 per pareggio, 0 per sconfitta.
+    """
+    conn = get_connection()
+    cur = _cursor(conn)
+    
+    # La query è densa ma fa una cosa precisa:
+    # 1. Per ogni partita calcola i goal di squadra A e B (subquery)
+    # 2. Per ogni partecipazione (player + match), determina se ha vinto, pareggiato o perso
+    # 3. Aggrega per giocatore contando V/P/S e calcolando i punti
+    cur.execute("""
+        WITH match_scores AS (
+            SELECT 
+                m.id AS match_id,
+                COALESCE(SUM(CASE WHEN g.team = 'A' THEN 1 ELSE 0 END), 0) AS score_a,
+                COALESCE(SUM(CASE WHEN g.team = 'B' THEN 1 ELSE 0 END), 0) AS score_b
+            FROM matches m
+            LEFT JOIN goals g ON g.match_id = m.id
+            GROUP BY m.id
+        ),
+        player_results AS (
+            SELECT 
+                mp.player_id,
+                CASE 
+                    WHEN mp.team = 'A' AND ms.score_a > ms.score_b THEN 'W'
+                    WHEN mp.team = 'B' AND ms.score_b > ms.score_a THEN 'W'
+                    WHEN ms.score_a = ms.score_b THEN 'D'
+                    ELSE 'L'
+                END AS result
+            FROM match_players mp
+            JOIN match_scores ms ON ms.match_id = mp.match_id
+        )
+        SELECT 
+            p.id,
+            p.nickname,
+            p.name,
+            COUNT(*) AS played,
+            SUM(CASE WHEN pr.result = 'W' THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN pr.result = 'D' THEN 1 ELSE 0 END) AS draws,
+            SUM(CASE WHEN pr.result = 'L' THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN pr.result = 'W' THEN 3 
+                     WHEN pr.result = 'D' THEN 1 
+                     ELSE 0 END) AS points
+        FROM player_results pr
+        JOIN players p ON p.id = pr.player_id
+        GROUP BY p.id, p.nickname, p.name
+        ORDER BY points DESC, wins DESC, played DESC, p.nickname ASC;
+    """)
+    
+    result = _rows_to_dicts(cur.fetchall())
+    conn.close()
+    return result

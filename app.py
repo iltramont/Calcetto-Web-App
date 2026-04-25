@@ -101,6 +101,7 @@ def home_page():
             - 👥 **Giocatori** — gestisci la rosa del gruppo
             - ⚽ **Nuova Partita** — registra una nuova partita
             - 📋 **Partite** — visualizza tutte le partite giocate
+            - 🏆 **Classifica** — punti, vittorie, pareggi e sconfitte
             - 👤 **Utenti** — gestisci gli account di accesso
             """)
         elif role == "manager":
@@ -109,12 +110,14 @@ def home_page():
             - 👥 **Giocatori** — gestisci la rosa del gruppo
             - ⚽ **Nuova Partita** — registra una nuova partita
             - 📋 **Partite** — visualizza tutte le partite giocate
+            - 🏆 **Classifica** — punti, vittorie, pareggi e sconfitte
             """)
         else:
             st.markdown("""
             ### Cosa puoi fare:
             - 👥 **Giocatori** — visualizza la rosa del gruppo
             - 📋 **Partite** — visualizza tutte le partite giocate
+            - 🏆 **Classifica** — punti, vittorie, pareggi e sconfitte
             """)
 
         st.info("Usa il menù a sinistra per navigare.")
@@ -122,20 +125,22 @@ def home_page():
 
 # ---------- REGISTRAZIONE PAGINE ----------
 home = st.Page(home_page, title="Home", icon="🏠", default=True)
-giocatori = st.Page("pages/1_👥_Giocatori.py", title="Giocatori", icon="👥")
-nuova_partita = st.Page("pages/2_⚽_Nuova_Partita.py", title="Nuova Partita", icon="⚽")
-partite = st.Page("pages/3_📋_Partite.py", title="Partite", icon="📋")
-utenti = st.Page("pages/4_👤_Utenti.py", title="Utenti", icon="👤")
-modifica_partita = st.Page("pages/5_✏️_Modifica_Partita.py", title="Modifica Partita", icon="✏️")
+giocatori           = st.Page("pages/1_👥_Giocatori.py", title="Giocatori", icon="👥")
+nuova_partita       = st.Page("pages/2_⚽_Nuova_Partita.py", title="Nuova Partita", icon="⚽")
+partite             = st.Page("pages/3_📋_Partite.py", title="Partite", icon="📋")
+utenti              = st.Page("pages/4_👤_Utenti.py", title="Utenti", icon="👤")
+modifica_partita    = st.Page("pages/5_✏️_Modifica_Partita.py", title="Modifica Partita", icon="✏️")
+classifica          = st.Page("pages/6_🏆_Classifica.py", title="Classifica", icon="🏆")
+
 
 role = get_current_user_role()
 
 if role == "admin":
-    pages = [home, giocatori, nuova_partita, partite, modifica_partita, utenti]
+    pages = [home, giocatori, nuova_partita, partite, modifica_partita, utenti, classifica]
 elif role == "manager":
-    pages = [home, giocatori, nuova_partita, partite, modifica_partita]
+    pages = [home, giocatori, nuova_partita, partite, modifica_partita, classifica]
 elif role == "viewer":
-    pages = [home, giocatori, partite]
+    pages = [home, giocatori, partite, classifica]
 else:
     pages = [home]
 
