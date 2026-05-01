@@ -79,17 +79,120 @@ total_matches = sum(p['played'] for p in standings) // 1  # ogni partita conta p
 # (il giocatore con più partite ne avrà giocate tante quante ne sono state fatte, se è sempre presente)
 max_played = max(p['played'] for p in standings)
 
-most_active = max(standings, key=lambda p: p['played'])
+max_played = max(p['played'] for p in standings)  # Il numero di partite massimo giocate da un singolo giocatore
+most_active = [p for p in standings if p['played'] == max_played]  # Tutti i giocatori che hanno giocato più partite
+nick_most_active = "\n\n".join(p['nickname'] for p in most_active)  # Nomi dei giocatori più attivi
+title_most_active = "Giocatori più assidui" if len(most_active) > 1 else "Giocatore più assiduo"
 
-
-col1, col2 = st.columns(2)
+col1, col2 = st.columns(2, border=False)
 with col1:
     st.metric("Giocatori in classifica", len(standings))
 with col2:
     st.metric(
-        "Giocatore più assiduo",
-        most_active['nickname'],
-        delta=f"{most_active['played']} partite",
+        title_most_active,
+        nick_most_active,
+        delta=f"{max_played} partite",
         delta_color="off",
-        help="Chi ha giocato più partite in totale"
+        delta_arrow="off",
+        help="Chi ha giocato più partite"
     )
+
+
+
+st.divider()
+
+# ---------- COMPAGNO FORTUNATO E BESTIA NERA ----------
+st.subheader("🤝 Compagni fortunati e 😈 bestie nere")
+st.caption(
+    "Seleziona un giocatore per vedere con quali compagni vince di più "
+    "e contro quali avversari perde di più. *Statistiche basate su almeno 3 partite condivise.*"
+)
+
+# Selettore giocatore
+nicknames = [p['nickname'] for p in standings]
+selected_nick = st.selectbox(
+    "Giocatore",
+    options=nicknames,
+    index=0
+)
+
+# Recupera l'id del giocatore selezionato
+selected_player = next(p for p in standings if p['nickname'] == selected_nick)
+
+from utils.db import get_player_chemistry
+chemistry = get_player_chemistry(selected_player['id'], min_matches=3)
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### 🤝 Top compagni")
+    if not chemistry['teammates']:
+        st.info("Non ci sono ancora abbastanza partite condivise (min. 3) per generare statistiche.")
+    else:
+        # Top 3 compagni per win_rate
+        for i, mate in enumerate(chemistry['teammates'][:3], start=1):
+            medal = ["🥇", "🥈", "🥉"][i-1]
+            st.markdown(
+                f"{medal} **{mate['nickname']}** — "
+                f"`{mate['win_rate']:.0f}%` vittorie  \n"
+                f"<small>{mate['played_together']} partite insieme: "
+                f"{mate['wins']}V / {mate['draws']}P / {mate['losses']}S</small>",
+                unsafe_allow_html=True
+            )
+
+with col2:
+    st.markdown("### 😈 Top bestie nere")
+    if not chemistry['opponents']:
+        st.info("Non ci sono ancora abbastanza partite contro per generare statistiche.")
+    else:
+        # Top 3 avversari per loss_rate
+        for i, opp in enumerate(chemistry['opponents'][:3], start=1):
+            medal = ["🥇", "🥈", "🥉"][i-1]
+            st.markdown(
+                f"{medal} **{opp['nickname']}** — "
+                f"`{opp['loss_rate']:.0f}%` sconfitte  \n"
+                f"<small>{opp['played_together']} partite contro: "
+                f"{opp['wins']}V / {opp['draws']}P / {opp['losses']}S</small>",
+                unsafe_allow_html=True
+            )
+
+# Sezione "tutti gli altri" sotto, in due tabelle se ci sono dati
+if chemistry['teammates'] or chemistry['opponents']:
+    with st.expander("Vedi statistiche complete"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Tutti i compagni**")
+            if chemistry['teammates']:
+                teammate_data = [
+                    {
+                        "Compagno": t['nickname'],
+                        "Insieme": t['played_together'],
+                        "V": t['wins'],
+                        "P": t['draws'],
+                        "S": t['losses'],
+                        "% Vittorie": round(t['win_rate'], 1)
+                    }
+                    for t in chemistry['teammates']
+                ]
+                st.dataframe(teammate_data, hide_index=True, use_container_width=True)
+            else:
+                st.caption("Nessun dato.")
+        
+        with col2:
+            st.markdown("**Tutti gli avversari**")
+            if chemistry['opponents']:
+                opponent_data = [
+                    {
+                        "Avversario": o['nickname'],
+                        "Contro": o['played_together'],
+                        "V": o['wins'],
+                        "P": o['draws'],
+                        "S": o['losses'],
+                        "% Sconfitte": round(o['loss_rate'], 1)
+                    }
+                    for o in chemistry['opponents']
+                ]
+                st.dataframe(opponent_data, hide_index=True, use_container_width=True)
+            else:
+                st.caption("Nessun dato.")

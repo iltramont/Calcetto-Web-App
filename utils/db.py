@@ -526,3 +526,108 @@ def get_standings():
     result = _rows_to_dicts(cur.fetchall())
     conn.close()
     return result
+
+
+def get_player_chemistry(player_id: int, min_matches: int = 3):
+    """
+    Per un dato giocatore, calcola le statistiche di "chimica" con gli altri giocatori:
+    - Compagni: quante partite ha giocato con loro nella stessa squadra, V/P/S
+    - Avversari: quante partite contro di loro, V/P/S (visti dal punto di vista del giocatore)
+    
+    Restituisce un dict con due liste ('teammates' e 'opponents'), 
+    filtrate per min_matches partite condivise.
+    Ogni elemento ha: nickname, played_together, wins, draws, losses, win_rate, loss_rate.
+    """
+    conn = get_connection()
+    cur = _cursor(conn)
+    
+    # Per ogni partita del giocatore, otteniamo: la sua squadra e il punteggio
+    # Poi joiniamo con gli altri partecipanti per scoprire compagni e avversari
+    cur.execute(_q("""
+        WITH match_scores AS (
+            SELECT 
+                m.id AS match_id,
+                COALESCE(SUM(CASE WHEN g.team = 'A' THEN 1 ELSE 0 END), 0) AS score_a,
+                COALESCE(SUM(CASE WHEN g.team = 'B' THEN 1 ELSE 0 END), 0) AS score_b
+            FROM matches m
+            LEFT JOIN goals g ON g.match_id = m.id
+            GROUP BY m.id
+        ),
+        my_matches AS (
+            -- Le partite del giocatore con la sua squadra e il suo risultato
+            SELECT 
+                mp.match_id,
+                mp.team AS my_team,
+                CASE 
+                    WHEN mp.team = 'A' AND ms.score_a > ms.score_b THEN 'W'
+                    WHEN mp.team = 'B' AND ms.score_b > ms.score_a THEN 'W'
+                    WHEN ms.score_a = ms.score_b THEN 'D'
+                    ELSE 'L'
+                END AS my_result
+            FROM match_players mp
+            JOIN match_scores ms ON ms.match_id = mp.match_id
+            WHERE mp.player_id = ?
+        )
+        SELECT 
+            other.player_id AS other_id,
+            p.nickname,
+            CASE WHEN other.team = mm.my_team THEN 'teammate' ELSE 'opponent' END AS relation,
+            mm.my_result,
+            COUNT(*) AS played_together
+        FROM my_matches mm
+        JOIN match_players other ON other.match_id = mm.match_id AND other.player_id != ?
+        JOIN players p ON p.id = other.player_id
+        GROUP BY other.player_id, p.nickname, relation, mm.my_result
+        ORDER BY p.nickname;
+    """), (player_id, player_id))
+    
+    rows = _rows_to_dicts(cur.fetchall())
+    conn.close()
+    
+    # Aggregiamo i risultati per giocatore (le righe arrivano divise per result W/D/L)
+    chemistry = {}  # other_id -> {nickname, relation, W, D, L}
+    for r in rows:
+        other_id = r['other_id']
+        relation = r['relation']
+        # Chiave composta: stesso giocatore può comparire sia come teammate sia come opponent
+        key = (other_id, relation)
+        
+        if key not in chemistry:
+            chemistry[key] = {
+                'nickname': r['nickname'],
+                'relation': relation,
+                'wins': 0,
+                'draws': 0,
+                'losses': 0,
+                'played_together': 0
+            }
+        
+        if r['my_result'] == 'W':
+            chemistry[key]['wins'] += r['played_together']
+        elif r['my_result'] == 'D':
+            chemistry[key]['draws'] += r['played_together']
+        else:
+            chemistry[key]['losses'] += r['played_together']
+        
+        chemistry[key]['played_together'] += r['played_together']
+    
+    teammates = []
+    opponents = []
+    
+    for key, stats in chemistry.items():
+        if stats['played_together'] < min_matches:
+            continue
+        
+        stats['win_rate'] = stats['wins'] / stats['played_together'] * 100
+        stats['loss_rate'] = stats['losses'] / stats['played_together'] * 100
+        
+        if stats['relation'] == 'teammate':
+            teammates.append(stats)
+        else:
+            opponents.append(stats)
+    
+    # Ordina compagni per win_rate decrescente, avversari per loss_rate decrescente
+    teammates.sort(key=lambda x: (x['win_rate'], x['played_together']), reverse=True)
+    opponents.sort(key=lambda x: (x['loss_rate'], x['played_together']), reverse=True)
+    
+    return {'teammates': teammates, 'opponents': opponents}
