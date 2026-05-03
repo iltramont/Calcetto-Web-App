@@ -97,7 +97,95 @@ with col2:
         help="Chi ha giocato più partite"
     )
 
+st.divider()
 
+# ---------- CLASSIFICA PESATA ----------
+st.subheader("🎯 Classifica Pesata")
+
+coefficiente_normalizzazione = 2  # Per penalizzare chi ha giocato meno partite
+
+st.caption(
+    "**2 punti** per vittoria, **1 punto** per pareggio, più un **bonus** in base "
+    "ai goal segnati dalla propria squadra.\nLo score finale varia da un minimo di "
+    "0 a un massimo di 3 e viene calcolato come:"
+)
+st.latex(r"""
+         Score = \frac{1}{N + C} \sum_{k=1}^{N}(P_k + B_k)
+         """)
+st.caption(
+    "Dove:\n"
+    "- $N$ è il numero di partite giocate\n"
+    f"- $C$ è un coefficiente di normalizzazione (attualmente $C=$ ${coefficiente_normalizzazione}$) per penalizzare chi ha giocato meno partite\n"
+    "- $P_k$ sono i punti base ottenuti in ogni partita ($2$ per vittoria, $1$ per pareggio, $0$ per sconfitta)\n"
+    "- $B_k$ sono i bonus ottenuti in ogni partita, calcolati come (goal squadra / goal totali)"
+)
+
+
+from utils.db import get_weighted_standings
+weighted = get_weighted_standings()
+
+if not weighted:
+    st.info("Nessuna partita giocata ancora.")
+else:
+    weighted_table = []
+    for i, p in enumerate(weighted, start=1):
+        position = f"{i}"
+        
+        weighted_table.append({
+            "Pos": position,
+            "Giocatore": p['nickname'],
+            "PG": p['played'],
+            "Base": p['base_points'],
+            "Bonus": round(p['bonus_points'], 2),
+            "Totale": round(p['total_points'], 2),
+            "Score": round(p['total_points'] / (p['played'] + coefficiente_normalizzazione), 2) if p['played'] > 0 else 0
+        })
+    
+    weighted_table = sorted(weighted_table, key=lambda x: x['Score'], reverse=True)
+    for i, row in enumerate(weighted_table, start=1):
+        if i == 1:
+            row['Pos'] = "1 🥇"
+        elif i == 2:
+            row['Pos'] = "2 🥈"
+        elif i == 3:
+            row['Pos'] = "3 🥉"
+        else:
+            row['Pos'] = f"{i}"
+    
+    st.dataframe(
+        weighted_table,
+        use_container_width=True,
+        hide_index=True,
+        column_order=["Pos", "Giocatore", "Score", "PG", "Base", "Bonus", "Totale"],
+        column_config={
+            "Pos": st.column_config.TextColumn("Pos", width="small"),
+            "Giocatore": st.column_config.TextColumn("Giocatore", width="medium"),
+            "PG": st.column_config.NumberColumn("PG", help="Partite Giocate", width="small"),
+            "Base": st.column_config.NumberColumn(
+                "Base",
+                help="Punti base: 2 per vittoria, 1 per pareggio",
+                width="small"
+            ),
+            "Bonus": st.column_config.NumberColumn(
+                "Bonus",
+                help="Somma dei bonus (goal squadra / goal totali) di ogni partita",
+                format="%.2f",
+                width="small"
+            ),
+            "Totale": st.column_config.NumberColumn(
+                "Totale",
+                help="Base + Bonus",
+                format="%.2f",
+                width="small"
+            ),
+            "Score": st.column_config.NumberColumn(
+                "Score",
+                help="Punti totali per partita giocata",
+                format="%.2f",
+                width="small"
+            ),
+        }
+    )
 
 st.divider()
 
@@ -105,7 +193,7 @@ st.divider()
 st.subheader("🤝 Compagni fortunati e 😈 bestie nere")
 st.caption(
     "Seleziona un giocatore per vedere con quali compagni vince di più "
-    "e contro quali avversari perde di più. *Statistiche basate su almeno 3 partite condivise.*"
+    "e contro quali avversari perde di più. *Statistiche basate su almeno 2 partite condivise.*"
 )
 
 # Selettore giocatore
@@ -120,14 +208,14 @@ selected_nick = st.selectbox(
 selected_player = next(p for p in standings if p['nickname'] == selected_nick)
 
 from utils.db import get_player_chemistry
-chemistry = get_player_chemistry(selected_player['id'], min_matches=3)
+chemistry = get_player_chemistry(selected_player['id'], min_matches=2)  # Cambia a 3 per statistiche più affidabili
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### 🤝 Top compagni")
     if not chemistry['teammates']:
-        st.info("Non ci sono ancora abbastanza partite condivise (min. 3) per generare statistiche.")
+        st.info("Non ci sono ancora abbastanza partite condivise (min. 2) per generare statistiche.")
     else:
         # Top 3 compagni per win_rate
         for i, mate in enumerate(chemistry['teammates'][:3], start=1):

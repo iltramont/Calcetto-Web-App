@@ -528,7 +528,7 @@ def get_standings():
     return result
 
 
-def get_player_chemistry(player_id: int, min_matches: int = 3):
+def get_player_chemistry(player_id: int, min_matches: int = 2):
     """
     Per un dato giocatore, calcola le statistiche di "chimica" con gli altri giocatori:
     - Compagni: quante partite ha giocato con loro nella stessa squadra, V/P/S
@@ -631,3 +631,89 @@ def get_player_chemistry(player_id: int, min_matches: int = 3):
     opponents.sort(key=lambda x: (x['loss_rate'], x['played_together']), reverse=True)
     
     return {'teammates': teammates, 'opponents': opponents}
+
+
+def get_weighted_standings():
+    """
+    Calcola la classifica con sistema pesato:
+    - 2 punti per vittoria, 1 per pareggio
+    - bonus = goal_squadra / goal_totali (decimale tra 0 e 1)
+    - punti totali = punti_base + bonus
+    
+    In caso di partita 0-0, il bonus è 0 (solo 1 punto del pareggio).
+    """
+    conn = get_connection()
+    cur = _cursor(conn)
+    
+    # La query è simile a get_standings ma calcola anche i goal della squadra
+    # del giocatore in ogni partita per il bonus.
+    cur.execute("""
+        WITH match_scores AS (
+            SELECT 
+                m.id AS match_id,
+                COALESCE(SUM(CASE WHEN g.team = 'A' THEN 1 ELSE 0 END), 0) AS score_a,
+                COALESCE(SUM(CASE WHEN g.team = 'B' THEN 1 ELSE 0 END), 0) AS score_b
+            FROM matches m
+            LEFT JOIN goals g ON g.match_id = m.id
+            GROUP BY m.id
+        ),
+        player_match_stats AS (
+            SELECT 
+                mp.player_id,
+                CASE 
+                    WHEN mp.team = 'A' AND ms.score_a > ms.score_b THEN 'W'
+                    WHEN mp.team = 'B' AND ms.score_b > ms.score_a THEN 'W'
+                    WHEN ms.score_a = ms.score_b THEN 'D'
+                    ELSE 'L'
+                END AS result,
+                CASE WHEN mp.team = 'A' THEN ms.score_a ELSE ms.score_b END AS my_team_goals,
+                (ms.score_a + ms.score_b) AS total_goals
+            FROM match_players mp
+            JOIN match_scores ms ON ms.match_id = mp.match_id
+        )
+        SELECT 
+            p.id,
+            p.nickname,
+            p.name,
+            COUNT(*) AS played,
+            SUM(CASE WHEN pms.result = 'W' THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN pms.result = 'D' THEN 1 ELSE 0 END) AS draws,
+            SUM(CASE WHEN pms.result = 'L' THEN 1 ELSE 0 END) AS losses,
+            SUM(CASE WHEN pms.result = 'W' THEN 2 
+                     WHEN pms.result = 'D' THEN 1 
+                     ELSE 0 END) AS base_points,
+            COALESCE(SUM(
+                CASE 
+                    WHEN pms.total_goals > 0 
+                    THEN CAST(pms.my_team_goals AS REAL) / pms.total_goals
+                    ELSE 0
+                END
+            ), 0) AS bonus_points
+        FROM player_match_stats pms
+        JOIN players p ON p.id = pms.player_id
+        GROUP BY p.id, p.nickname, p.name
+        ORDER BY (
+            SUM(CASE WHEN pms.result = 'W' THEN 2 WHEN pms.result = 'D' THEN 1 ELSE 0 END) +
+            COALESCE(SUM(
+                CASE 
+                    WHEN pms.total_goals > 0 
+                    THEN CAST(pms.my_team_goals AS REAL) / pms.total_goals
+                    ELSE 0
+                END
+            ), 0)
+        ) DESC, wins DESC, played DESC, p.nickname ASC;
+    """)
+    
+    result = _rows_to_dicts(cur.fetchall())
+    conn.close()
+    
+    # Calcola il punteggio totale (base + bonus) come float
+    for r in result:
+        # Forziamo i tipi a float per evitare problemi con Decimal di PostgreSQL
+        base = float(r['base_points'])
+        bonus = float(r['bonus_points'])
+        r['base_points'] = base
+        r['bonus_points'] = bonus
+        r['total_points'] = base + bonus
+    
+    return result
